@@ -7,7 +7,8 @@ import {
 import {
   cleanUrl,
   isJSRequest,
-  normalizePath
+  normalizePath,
+  getShortName
 } from "../utils";
 // magic-string 用来作字符串编辑
 import MagicString from "magic-string";
@@ -15,7 +16,6 @@ import path from "path";
 import { Plugin } from "../plugin";
 import { ServerContext } from "../server/index";
 import { pathExists } from "fs-extra";
-import resolve from "resolve";
 
 export function importAnalysisPlugin(): Plugin {
   let serverContext: ServerContext;
@@ -34,6 +34,27 @@ export function importAnalysisPlugin(): Plugin {
       // 解析 import 语句
       const [imports] = parse(code);
       const ms = new MagicString(code);
+
+      const resolve = async (id: string, importer?: string) => {
+        const resolved = await serverContext.pluginContainer.resolveId(
+          id,
+          normalizePath(importer)
+        );
+        if (!resolved) {
+          return;
+        }
+        const cleanedId = cleanUrl(resolved.id);
+        const mod = moduleGraph.getModuleById(cleanedId);
+        let resolvedId = `/${getShortName(resolved.id, serverContext.root)}`;
+        if (mod && mod.lastHMRTimestamp > 0) {
+          // resolvedId += "?t=" + mod.lastHMRTimestamp;
+        }
+        return resolvedId;
+      };
+
+      const { moduleGraph } = serverContext;
+      const curMod = moduleGraph.getModuleById(id)!;
+      const importedModules = new Set<string>();
       // 对每一个 import 语句依次进行分析
       for (const importInfo of imports) {
         // 举例说明: const str = `import React from 'react'`
@@ -53,15 +74,17 @@ export function importAnalysisPlugin(): Plugin {
             path.join('/', PRE_BUNDLE_DIR, `${modSource}.js`)
           );
           ms.overwrite(modStart, modEnd, bundlePath);
+          importedModules.add(bundlePath);
         } else if (modSource.startsWith(".") || modSource.startsWith("/")) {
           // 直接调用插件上下文的 resolve 方法，会自动经过路径解析插件的处理
-          const resolved = await serverContext.pluginContainer.resolveId(modSource, id);
+          const resolved = await resolve(modSource, id);
           if (resolved) {
-            ms.overwrite(modStart, modEnd, resolved.id);
+            ms.overwrite(modStart, modEnd, resolved);
+            importedModules.add(resolved);
           }
         }
       }
-
+      moduleGraph.updateModuleInfo(curMod, importedModules);
       return {
         code: ms.toString(),
         // 生成 SourceMap
