@@ -115,3 +115,27 @@ async function fetchUpdate({ path, timestamp }: Update) {
     console.log(`[vite] hot updated: ${path}`);
   };
 }
+
+const sheetsMap = new Map();
+
+export function updateStyle(id: string, content: string) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.innerHTML = content;
+    document.head.appendChild(style);
+  } else {
+    style.innerHTML = content;
+  }
+  sheetsMap.set(id, style);
+}
+
+export function removeStyle(id: string): void {
+  const style = sheetsMap.get(id);
+  if (style) {
+    document.head.removeChild(style);
+  }
+  sheetsMap.delete(id);
+}
+
